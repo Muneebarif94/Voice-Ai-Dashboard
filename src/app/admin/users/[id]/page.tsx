@@ -3,19 +3,18 @@
 
 import { useState, useEffect } from 'react';
 import { useParams } from 'next/navigation';
-import { useUserManagement } from '@/lib/userManagement';
-import { useApiKeyManagement } from '@/lib/apiKeys';
-import { useUsageData } from '@/lib/usageData';
-import { useAuth } from '@/lib/auth';
+import { getUserById, updateUser, deleteUser } from '@/lib/userManagement'; // Import individual functions
+import { getApiKey, setApiKey } from '@/lib/apiKeys'; // Import getApiKey and setApiKey directly
+import { fetchUserUsageData } from '@/lib/usageData'; // Assuming this is correct
+import { useAuth } from '@/lib/auth'; // Import useAuth
+import { toast } from 'react-hot-toast'; // For better error/success messages
 
 export default function UserDetail() {
   const params = useParams();
   const userId = params.id as string;
   
-  const { getUserById, resetUserPassword, deactivateUser, updateUser } = useUserManagement();
-  const { getApiKey, setApiKey } = useApiKeyManagement();
-  const { fetchUserUsageData } = useUsageData();
-  const { user, loading: authLoading } = useAuth();
+  // Destructure properties from useAuth hook
+  const { user, isAdmin, loading: authLoading, resetPassword } = useAuth(); 
   
   const [userData, setUserData] = useState<any>(null);
   const [apiKeyData, setApiKeyData] = useState<any>(null);
@@ -28,85 +27,105 @@ export default function UserDetail() {
   const [updating, setUpdating] = useState(false);
 
   useEffect(() => {
+    // Only fetch data if user is authenticated, auth loading is complete, and userId is available
     if (user && !authLoading && userId) {
       fetchUserData();
     }
-  }, [user, authLoading, userId]);
+  }, [user, authLoading, userId]); // Depend on user, authLoading, and userId
 
   const fetchUserData = async () => {
     setLoading(true);
+    setError(''); // Clear previous errors
+    
+    // Ensure admin privileges before fetching data
+    if (!user || !isAdmin()) {
+      setError('Unauthorized: You must be an admin to view this page.');
+      setLoading(false);
+      return;
+    }
+
     try {
-      // Fetch user details
-      const userData = await getUserById(userId);
-      setUserData(userData);
+      // Fetch user details - pass isAdmin() flag to getUserById
+      const fetchedUserData = await getUserById(isAdmin(), userId);
+      setUserData(fetchedUserData);
       
       // Fetch API key
-      const apiKeyData = await getApiKey(userId);
-      setApiKeyData(apiKeyData);
+      const fetchedApiKeyData = await getApiKey(userId); // Call getApiKey directly
+      setApiKeyData(fetchedApiKeyData);
       
       // Fetch usage data
-      const usageData = await fetchUserUsageData(userId);
-      setUsageData(usageData);
+      const fetchedUsageData = await fetchUserUsageData(userId);
+      setUsageData(fetchedUsageData);
       
-      setError('');
     } catch (err: any) {
       console.error('Error fetching user data:', err);
       setError(err.message || 'Failed to fetch user data');
+      toast.error(`Failed to fetch user data: ${err.message}`);
     } finally {
       setLoading(false);
     }
   };
 
   const handleResetPassword = async () => {
-    if (!userData) return;
+    if (!userData || !user || !isAdmin()) {
+      toast.error('Unauthorized or user data not available.');
+      return;
+    }
     
     try {
-      await resetUserPassword(userData.email);
-      alert('Password reset email sent successfully');
+      // Use the resetPassword function from useAuth
+      await resetPassword(userData.email);
+      toast.success('Password reset email sent successfully!');
     } catch (err: any) {
       console.error('Error resetting password:', err);
-      alert(`Failed to reset password: ${err.message}`);
+      toast.error(`Failed to reset password: ${err.message}`);
     }
   };
 
   const handleToggleStatus = async () => {
-    if (!userData) return;
+    if (!userData || !user || !isAdmin()) {
+      toast.error('Unauthorized or user data not available.');
+      return;
+    }
     
     try {
-      if (userData.isActive) {
-        await deactivateUser(userId);
-      } else {
-        await updateUser(userId, { isActive: true });
-      }
+      // Use the updateUser function from userManagement.ts
+      // Pass adminUserId (user.uid) and isAdmin() flag
+      await updateUser(user.uid, isAdmin(), userId, { isActive: !userData.isActive });
       
-      // Refresh user data
+      toast.success(`User ${userData.isActive ? 'deactivated' : 'activated'} successfully!`);
+      // Refresh user data to reflect the change
       fetchUserData();
     } catch (err: any) {
       console.error('Error updating user status:', err);
-      alert(`Failed to update user status: ${err.message}`);
+      toast.error(`Failed to update user status: ${err.message}`);
     }
   };
 
   const handleUpdateApiKey = async () => {
     if (!newApiKey) {
-      alert('Please enter a new API key');
+      toast.error('Please enter a new API key');
+      return;
+    }
+    if (!user || !isAdmin()) {
+      toast.error('Unauthorized: You must be an admin to update API keys.');
       return;
     }
     
     setUpdating(true);
     try {
-      await setApiKey(userId, newApiKey);
+      await setApiKey(userId, newApiKey); // Call setApiKey directly
       setNewApiKey('');
       setShowUpdateKey(false);
       
       // Refresh API key data
-      const apiKeyData = await getApiKey(userId);
-      setApiKeyData(apiKeyData);
+      const updatedApiKeyData = await getApiKey(userId); // Call getApiKey directly
+      setApiKeyData(updatedApiKeyData);
       
-      alert('API key updated successfully');
+      toast.success('API key updated successfully!');
     } catch (err: any) {
       console.error('Error updating API key:', err);
-      alert(`Failed to update API key: ${err.message}`);
+      toast.error(`Failed to update API key: ${err.message}`);
     } finally {
       setUpdating(false);
     }
@@ -114,6 +133,16 @@ export default function UserDetail() {
 
   if (authLoading || loading) {
     return <div className="flex justify-center items-center min-h-screen">Loading...</div>;
+  }
+
+  // If not an admin, show access denied
+  if (!user || !isAdmin()) {
+    return (
+      <div className="container mx-auto px-4 py-8 text-center">
+        <h1 className="text-3xl font-bold mb-6">Access Denied</h1>
+        <p className="text-red-500">You do not have administrative privileges to view this page.</p>
+      </div>
+    );
   }
 
   if (!userData) {
@@ -129,7 +158,7 @@ export default function UserDetail() {
   }
 
   return (
-    <div>
+    <div className="container mx-auto px-4 py-8">
       <div className="mb-6">
         <a href="/admin/users" className="text-blue-600 hover:text-blue-800">
           &larr; Back to User List
@@ -201,6 +230,10 @@ export default function UserDetail() {
               </p>
             </div>
             <div>
+              <p className="text-sm text-gray-500">ElevenLabs Agent ID</p>
+              <p className="font-medium">{userData.elevenLabsAgentId || 'N/A'}</p>
+            </div>
+            <div>
               <p className="text-sm text-gray-500">Created</p>
               <p className="font-medium">
                 {userData.createdAt ? new Date(userData.createdAt.toDate()).toLocaleString() : 'N/A'}
@@ -233,7 +266,7 @@ export default function UserDetail() {
                 <div className="flex items-center mt-1">
                   <input 
                     type={showApiKey ? "text" : "password"} 
-                    value={apiKeyData.decryptedKey} 
+                    value={apiKeyData.decryptedKey || ''} // Ensure it's not null/undefined
                     readOnly 
                     className="flex-grow px-3 py-2 border border-gray-300 rounded-l-md bg-gray-50"
                   />
@@ -327,7 +360,7 @@ export default function UserDetail() {
         )}
         
         <div className="mt-4 text-right text-sm text-gray-500">
-          Last updated: {usageData ? new Date(usageData.lastUpdated).toLocaleString() : 'Never'}
+          Last updated: {usageData?.lastUpdated ? new Date(usageData.lastUpdated.toDate()).toLocaleString() : 'Never'}
         </div>
       </div>
     </div>

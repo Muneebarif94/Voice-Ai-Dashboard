@@ -25,11 +25,13 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
         <header className="bg-white shadow">
           <div className="container mx-auto px-4 py-4 flex justify-between items-center">
             <h1 className="text-xl font-bold">AI Voice Agent Usage Tracker</h1>
-            {/* ✅ Updated Navigation */}
             <nav>
               <ul className="flex space-x-4">
                 <li>
                   <a href="/dashboard" className="text-blue-600 hover:text-blue-800">Dashboard</a>
+                </li>
+                <li>
+                  <a href="/dashboard/conversations" className="text-blue-600 hover:text-blue-800">Conversations</a>
                 </li>
                 {isUserAdmin && (
                   <li>

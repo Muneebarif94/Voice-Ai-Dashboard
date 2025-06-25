@@ -1,68 +1,70 @@
 // src/lib/auth.tsx
-import { useState, useEffect, createContext, useContext, ReactNode } from 'react';
-import { 
-  User,
+'use client';
+
+import React, { createContext, useContext, useEffect, useState, ReactNode } from 'react';
+import { auth, db } from './firebase';
+import {
+  onAuthStateChanged,
   createUserWithEmailAndPassword,
   signInWithEmailAndPassword,
   signOut,
-  onAuthStateChanged,
   sendPasswordResetEmail,
-  updateProfile
+  updatePassword,
+  User // Directly import the User type
 } from 'firebase/auth';
-import { doc, setDoc, getDoc, serverTimestamp } from 'firebase/firestore';
-import { auth, db } from './firebase';
+import { doc, getDoc, setDoc, serverTimestamp, updateDoc } from 'firebase/firestore';
 
-interface AuthUser extends User {
-  role?: string;
+// Extend FirebaseUser to include custom fields
+interface CustomFirebaseUser extends User { // Use the directly imported User type here
+  role?: 'user' | 'admin';
+  displayName?: string;
+  phoneNumber?: string;
+  businessName?: string;
+  elevenLabsAgentId?: string; // Add this field
 }
 
 interface AuthContextType {
-  user: AuthUser | null;
-  userRole: string | null;
+  user: CustomFirebaseUser | null;
   loading: boolean;
-  signUp: (email: string, password: string, displayName: string, role: string) => Promise<void>;
-  signIn: (email: string, password: string) => Promise<void>;
+  signup: (email: string, password: string, displayName: string, phoneNumber: string, businessName?: string, elevenLabsAgentId?: string) => Promise<void>;
+  login: (email: string, password: string) => Promise<void>;
   logout: () => Promise<void>;
   resetPassword: (email: string) => Promise<void>;
+  updateUserPassword: (password: string) => Promise<void>;
+  updateUserProfile: (data: { displayName?: string; phoneNumber?: string; businessName?: string; elevenLabsAgentId?: string }) => Promise<void>;
   isAdmin: () => boolean;
 }
 
-const AuthContext = createContext<AuthContextType>({
-  user: null,
-  userRole: null,
-  loading: true,
-  signUp: async () => {},
-  signIn: async () => {},
-  logout: async () => {},
-  resetPassword: async () => {},
-  isAdmin: () => false,
-});
-
-export const useAuth = () => useContext(AuthContext);
+const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 export const AuthProvider = ({ children }: { children: ReactNode }) => {
-  const [user, setUser] = useState<AuthUser | null>(null);
-  const [userRole, setUserRole] = useState<string | null>(null);
+  const [user, setUser] = useState<CustomFirebaseUser | null>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, async (user) => {
-      if (user) {
-        // Fetch user role from Firestore
-        const userDoc = await getDoc(doc(db, 'users', user.uid));
-        if (userDoc.exists()) {
-          const userData = userDoc.data();
-          const authUser = user as AuthUser;
-          authUser.role = userData.role || 'user';
-          setUser(authUser);
-          setUserRole(authUser.role);
+    const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
+      if (firebaseUser) {
+        // Fetch user document from Firestore to get custom claims like role and other profile data
+        const userDocRef = doc(db, 'users', firebaseUser.uid);
+        const userDocSnap = await getDoc(userDocRef);
+
+        if (userDocSnap.exists()) {
+          const userData = userDocSnap.data();
+          setUser({
+            ...firebaseUser,
+            role: userData.role,
+            displayName: userData.displayName,
+            phoneNumber: userData.phoneNumber,
+            businessName: userData.businessName,
+            elevenLabsAgentId: userData.elevenLabsAgentId, // Fetch elevenLabsAgentId
+          });
         } else {
-          setUser(user);
-          setUserRole('user'); // Default role
+          // If user document doesn't exist (e.g., new signup via Firebase Auth directly)
+          // This case should ideally be handled by creating the Firestore doc during signup
+          setUser(firebaseUser);
         }
       } else {
         setUser(null);
-        setUserRole('');
       }
       setLoading(false);
     });
@@ -70,87 +72,120 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     return () => unsubscribe();
   }, []);
 
-  const isAdmin = () => {
-    return user?.role === 'admin';
-  };
+  const signup = async (email: string, password: string, displayName: string, phoneNumber: string, businessName?: string, elevenLabsAgentId?: string) => {
+    const userCredential = await createUserWithEmailAndPassword(auth, email, password);
+    const firebaseUser = userCredential.user;
 
-  const signUp = async (email: string, password: string, displayName: string, role: string = 'user') => {
-    try {
-      const userCredential = await createUserWithEmailAndPassword(auth, email, password);
-      const user = userCredential.user;
-      
-      // Update profile with display name
-      await updateProfile(user, { displayName });
-      
-      // Create user document in Firestore with role
-      await setDoc(doc(db, 'users', user.uid), {
-        email,
-        displayName,
-        role,
-        createdAt: serverTimestamp(),
-        lastLogin: serverTimestamp(),
-        isActive: true
+    await setDoc(doc(db, 'users', firebaseUser.uid), {
+      email,
+      displayName,
+      phoneNumber,
+      businessName: businessName || '',
+      role: 'user', // Default role for new signups
+      elevenLabsAgentId: elevenLabsAgentId || null, // Store elevenLabsAgentId
+      createdAt: serverTimestamp(),
+      lastLogin: serverTimestamp(),
+    });
+    // Re-fetch user data to update context with new fields
+    const userDocRef = doc(db, 'users', firebaseUser.uid);
+    const userDocSnap = await getDoc(userDocRef);
+    if (userDocSnap.exists()) {
+      const userData = userDocSnap.data();
+      setUser({
+        ...firebaseUser,
+        role: userData.role,
+        displayName: userData.displayName,
+        phoneNumber: userData.phoneNumber,
+        businessName: userData.businessName,
+        elevenLabsAgentId: userData.elevenLabsAgentId,
       });
-      
-      // Create initial usage data document
-      await setDoc(doc(db, 'usageData', user.uid), {
-        lastUpdated: serverTimestamp(),
-        totalMinutesUsed: 0,
-        minutesRemaining: 0,
-        creditsLeft: 0,
-        history: []
-      });
-      
-    } catch (error) {
-      console.error('Error signing up:', error);
-      throw error;
     }
   };
 
-  const signIn = async (email: string, password: string) => {
-    try {
-      await signInWithEmailAndPassword(auth, email, password);
-      
-      // Update last login timestamp
-      if (auth.currentUser) {
-        await setDoc(doc(db, 'users', auth.currentUser.uid), {
-          lastLogin: serverTimestamp()
-        }, { merge: true });
-      }
-    } catch (error) {
-      console.error('Error signing in:', error);
-      throw error;
+  const login = async (email: string, password: string) => {
+    const userCredential = await signInWithEmailAndPassword(auth, email, password);
+    const firebaseUser = userCredential.user;
+
+    // Update last login timestamp
+    await updateDoc(doc(db, 'users', firebaseUser.uid), {
+      lastLogin: serverTimestamp(),
+    });
+
+    // Re-fetch user data to update context with latest fields
+    const userDocRef = doc(db, 'users', firebaseUser.uid);
+    const userDocSnap = await getDoc(userDocRef);
+    if (userDocSnap.exists()) {
+      const userData = userDocSnap.data();
+      setUser({
+        ...firebaseUser,
+        role: userData.role,
+        displayName: userData.displayName,
+        phoneNumber: userData.phoneNumber,
+        businessName: userData.businessName,
+        elevenLabsAgentId: userData.elevenLabsAgentId,
+      });
     }
   };
 
   const logout = async () => {
-    try {
-      await signOut(auth);
-    } catch (error) {
-      console.error('Error signing out:', error);
-      throw error;
+    await signOut(auth);
+    setUser(null);
+  };
+
+  const resetPassword = (email: string) => {
+    return sendPasswordResetEmail(auth, email);
+  };
+
+  const updateUserPassword = (password: string) => {
+    if (auth.currentUser) {
+      return updatePassword(auth.currentUser, password);
+    }
+    return Promise.reject(new Error('No user logged in.'));
+  };
+
+  const updateUserProfile = async (data: { displayName?: string; phoneNumber?: string; businessName?: string; elevenLabsAgentId?: string }) => {
+    if (user) {
+      const userDocRef = doc(db, 'users', user.uid);
+      await updateDoc(userDocRef, {
+        ...data,
+      });
+      // Update local state to reflect changes
+      setUser(prevUser => ({
+        ...(prevUser as CustomFirebaseUser),
+        ...data,
+      }));
+    } else {
+      return Promise.reject(new Error('No user logged in.'));
     }
   };
 
-  const resetPassword = async (email: string) => {
-    try {
-      await sendPasswordResetEmail(auth, email);
-    } catch (error) {
-      console.error('Error resetting password:', error);
-      throw error;
-    }
+  const isAdmin = () => {
+    return user?.role === 'admin';
   };
 
   const value = {
     user,
     loading,
-    signIn,
-    signUp,
+    signup,
+    login,
     logout,
     resetPassword,
-    isAdmin,  // Make sure this is included
-    userRole: user?.role || 'user'
+    updateUserPassword,
+    updateUserProfile,
+    isAdmin,
   };
 
-  return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
+  return (
+    <AuthContext.Provider value={value}>
+      {children}
+    </AuthContext.Provider>
+  );
+};
+
+export const useAuth = () => {
+  const context = useContext(AuthContext);
+  if (context === undefined) {
+    throw new Error('useAuth must be used within an AuthProvider');
+  }
+  return context;
 };

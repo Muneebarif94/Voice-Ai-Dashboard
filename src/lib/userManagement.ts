@@ -1,67 +1,25 @@
 // src/lib/userManagement.ts
-import { collection, doc, getDoc, getDocs, query, setDoc, updateDoc, where, serverTimestamp, deleteDoc } from 'firebase/firestore';
-import { createUserWithEmailAndPassword, sendPasswordResetEmail } from 'firebase/auth';
 import { db, auth } from './firebase';
-import { useAuth } from './auth';
-import { useApiKeyManagement } from './apiKeys';
+import { doc, setDoc, getDoc, updateDoc, collection, getDocs, query, where, serverTimestamp } from 'firebase/firestore';
+import { createUserWithEmailAndPassword, sendPasswordResetEmail } from 'firebase/auth';
 
-export const useUserManagement = () => {
-  const { user, isAdmin } = useAuth();
-  const { setApiKey } = useApiKeyManagement();
-
-  // Get all users (admin only)
-  const getAllUsers = async () => {
-    if (!user || !isAdmin()) {
-      throw new Error('Unauthorized access');
-    }
-
-    try {
-      const usersQuery = query(collection(db, 'users'));
-      const userSnapshot = await getDocs(usersQuery);
-      
-      return userSnapshot.docs.map(doc => ({
-        id: doc.id,
-        ...doc.data()
-      }));
-    } catch (error) {
-      console.error('Error fetching users:', error);
-      throw error;
-    }
-  };
-
-  // Get user by ID (admin only)
-  const getUserById = async (userId: string) => {
-    if (!user || !isAdmin()) {
-      throw new Error('Unauthorized access');
-    }
-
-    try {
-      const userDoc = await getDoc(doc(db, 'users', userId));
-      if (userDoc.exists()) {
-        return {
-          id: userDoc.id,
-          ...userDoc.data()
-        };
-      }
-      return null;
-    } catch (error) {
-      console.error('Error fetching user:', error);
-      throw error;
-    }
-  };
-
-  // Update the createUser function:
-const createUser = async (userData: {
-  email: string;
-  displayName: string;
-  phoneNumber: string;
-  businessName?: string;
-  role: string;
-  apiKey: string;
-  sendWelcomeEmail: boolean;
-}) => {
-  if (!user || !isAdmin()) {
-    throw new Error('Unauthorized access');
+// Function to create a new user (called by admin)
+export const createUser = async (
+  adminUserId: string, // ID of the admin performing the action
+  isAdminFlag: boolean, // Flag indicating if the caller is an admin
+  userData: {
+    email: string;
+    displayName: string;
+    phoneNumber: string;
+    businessName?: string;
+    role: string;
+    apiKey: string;
+    elevenLabsAgentId?: string;
+    sendWelcomeEmail: boolean;
+  }
+) => {
+  if (!isAdminFlag) {
+    throw new Error('Unauthorized access: Only admins can create users.');
   }
 
   try {
@@ -87,15 +45,17 @@ const createUser = async (userData: {
       phoneNumber: userData.phoneNumber,
       businessName: userData.businessName || '',
       role: userData.role,
+      elevenLabsAgentId: userData.elevenLabsAgentId || null,
       createdAt: serverTimestamp(),
-      createdBy: user.uid,
+      createdBy: adminUserId, // Use the passed adminUserId
       lastLogin: null,
       isActive: true
     });
     
     console.log('User document created in Firestore');
     
-    // Store API key
+    // Store API key (assuming setApiKey is imported or available globally)
+    const { setApiKey } = await import('./apiKeys'); // Dynamic import
     await setApiKey(newUser.uid, userData.apiKey);
     console.log('API key stored');
     
@@ -117,14 +77,15 @@ const createUser = async (userData: {
     }
     
     // Log admin activity
-    await setDoc(doc(db, 'adminLogs', `${Date.now()}-${user.uid}`), {
-      adminId: user.uid,
+    await setDoc(doc(db, 'adminLogs', `${Date.now()}-${adminUserId}`), { // Use the passed adminUserId
+      adminId: adminUserId,
       action: 'create_user',
       targetUserId: newUser.uid,
       timestamp: serverTimestamp(),
       details: { 
         email: userData.email,
         role: userData.role,
+        elevenLabsAgentId: userData.elevenLabsAgentId,
         sendWelcomeEmail: userData.sendWelcomeEmail
       }
     });
@@ -141,112 +102,108 @@ const createUser = async (userData: {
     throw error;
   }
 };
-  // Update user (admin only)
-  const updateUser = async (userId: string, userData: {
+
+// Function to fetch all users (for admin dashboard)
+export const getAllUsers = async (isAdminFlag: boolean) => { // Accept isAdminFlag
+  if (!isAdminFlag) {
+    throw new Error('Unauthorized access: Only admins can view all users.');
+  }
+
+  const usersCollectionRef = collection(db, 'users');
+  const q = query(usersCollectionRef);
+  const querySnapshot = await getDocs(q);
+
+  const usersList: any[] = [];
+  for (const docSnap of querySnapshot.docs) {
+    const userData = docSnap.data();
+    // Fetch API key for admin view
+    const { getApiKey } = await import('./apiKeys'); // Dynamic import
+    const apiKeyData = await getApiKey(docSnap.id);
+    usersList.push({
+      id: docSnap.id,
+      ...userData,
+      apiKey: apiKeyData?.decryptedKey || 'Not set', // Include API key for admin view
+    });
+  }
+  return usersList;
+};
+
+// Function to update a user's details (for admin)
+export const updateUser = async (
+  adminUserId: string, // ID of the admin performing the action
+  isAdminFlag: boolean, // Flag indicating if the caller is an admin
+  userId: string, 
+  data: {
     displayName?: string;
     phoneNumber?: string;
     businessName?: string;
     role?: string;
     isActive?: boolean;
-  }) => {
-    if (!user || !isAdmin()) {
-      throw new Error('Unauthorized access');
-    }
+    elevenLabsAgentId?: string;
+  }
+) => {
+  if (!isAdminFlag) {
+    throw new Error('Unauthorized access: Only admins can update users.');
+  }
 
-    try {
-      await updateDoc(doc(db, 'users', userId), {
-        ...userData,
-        updatedAt: serverTimestamp(),
-        updatedBy: user.uid
-      });
-      
-      // Log admin activity
-      await setDoc(doc(db, 'adminLogs', `${Date.now()}-${user.uid}`), {
-        adminId: user.uid,
-        action: 'update_user',
-        targetUserId: userId,
-        timestamp: serverTimestamp(),
-        details: { updatedFields: Object.keys(userData) },
-        ipAddress: 'client-ip' // In a real app, get from request
-      });
-      
-      return true;
-    } catch (error) {
-      console.error('Error updating user:', error);
-      throw error;
-    }
-  };
+  const userDocRef = doc(db, 'users', userId);
+  await updateDoc(userDocRef, data);
 
-  // Deactivate user (admin only)
-  const deactivateUser = async (userId: string) => {
-    if (!user || !isAdmin()) {
-      throw new Error('Unauthorized access');
-    }
+  // Log admin activity
+  await setDoc(doc(db, 'adminLogs', `${Date.now()}-${adminUserId}`), { // Use the passed adminUserId
+    adminId: adminUserId,
+    action: 'update_user',
+    targetUserId: userId,
+    timestamp: serverTimestamp(),
+    details: data
+  });
+};
 
-    try {
-      await updateDoc(doc(db, 'users', userId), {
-        isActive: false,
-        deactivatedAt: serverTimestamp(),
-        deactivatedBy: user.uid
-      });
-      
-      // Log admin activity
-      await setDoc(doc(db, 'adminLogs', `${Date.now()}-${user.uid}`), {
-        adminId: user.uid,
-        action: 'deactivate_user',
-        targetUserId: userId,
-        timestamp: serverTimestamp(),
-        details: { action: 'User deactivated' },
-        ipAddress: 'client-ip' // In a real app, get from request
-      });
-      
-      return true;
-    } catch (error) {
-      console.error('Error deactivating user:', error);
-      throw error;
-    }
-  };
+// Function to delete a user (for admin)
+export const deleteUser = async (
+  adminUserId: string, // ID of the admin performing the action
+  isAdminFlag: boolean, // Flag indicating if the caller is an admin
+  userId: string
+) => {
+  if (!isAdminFlag) {
+    throw new Error('Unauthorized access: Only admins can delete users.');
+  }
 
-  // Reset user password (admin only)
-  const resetUserPassword = async (email: string) => {
-    if (!user || !isAdmin()) {
-      throw new Error('Unauthorized access');
-    }
+  // In a real application, you'd also delete the user from Firebase Auth
+  // and clean up associated data (API key, usage data, etc.)
+  // For simplicity, this example only marks as inactive or deletes the Firestore doc.
+  // A more robust solution would involve Firebase Cloud Functions for cleanup.
+  const userDocRef = doc(db, 'users', userId);
+  await updateDoc(userDocRef, { isActive: false }); // Or deleteDoc(userDocRef);
 
-    try {
-      await sendPasswordResetEmail(auth, email);
-      
-      // Find user ID by email
-      const usersQuery = query(collection(db, 'users'), where('email', '==', email));
-      const userSnapshot = await getDocs(usersQuery);
-      
-      if (!userSnapshot.empty) {
-        const userId = userSnapshot.docs[0].id;
-        
-        // Log admin activity
-        await setDoc(doc(db, 'adminLogs', `${Date.now()}-${user.uid}`), {
-          adminId: user.uid,
-          action: 'reset_password',
-          targetUserId: userId,
-          timestamp: serverTimestamp(),
-          details: { action: 'Password reset email sent' },
-          ipAddress: 'client-ip' // In a real app, get from request
-        });
-      }
-      
-      return true;
-    } catch (error) {
-      console.error('Error resetting password:', error);
-      throw error;
-    }
-  };
+  // Log admin activity
+  await setDoc(doc(db, 'adminLogs', `${Date.now()}-${adminUserId}`), { // Use the passed adminUserId
+    adminId: adminUserId,
+    action: 'delete_user',
+    targetUserId: userId,
+    timestamp: serverTimestamp(),
+  });
+};
 
-  return {
-    getAllUsers,
-    getUserById,
-    createUser,
-    updateUser,
-    deactivateUser,
-    resetUserPassword
-  };
+// Function to get a single user by ID (for admin)
+export const getUserById = async (isAdminFlag: boolean, userId: string) => { // Accept isAdminFlag
+  if (!isAdminFlag) {
+    throw new Error('Unauthorized access: Only admins can view user details.');
+  }
+
+  const userDocRef = doc(db, 'users', userId);
+  const userDocSnap = await getDoc(userDocRef);
+
+  if (userDocSnap.exists()) {
+    const userData = userDocSnap.data();
+    const { getApiKey } = await import('./apiKeys'); // Dynamic import
+    const apiKeyData = await getApiKey(userId);
+    return {
+      id: userDocSnap.id,
+      ...userData,
+      apiKey: apiKeyData?.decryptedKey || 'Not set',
+    };
+  } else {
+    throw new Error('User not found');
+  }
 };

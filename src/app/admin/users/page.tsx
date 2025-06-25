@@ -1,143 +1,189 @@
-// src/app/admin/users/page.tsx
+// src/app/admin/page.tsx
 'use client';
 
 import { useState, useEffect } from 'react';
-import { useUserManagement } from '@/lib/userManagement';
 import { useAuth } from '@/lib/auth';
-import ProtectedRoute from '@/components/auth/ProtectedRoute'; // ✅ add this
-import UserCreationForm from '@/components/admin/UserCreationForm';
+import { getAllUsers } from '@/lib/userManagement'; // Import getAllUsers directly
+import { useUsageData } from '@/lib/usageData'; // Import the useUsageData hook
+import { toast } from 'react-hot-toast';
 
-export default function UserManagement() {
-  const { getAllUsers } = useUserManagement();
-  const { user, loading: authLoading } = useAuth();
-  
-  const [users, setUsers] = useState<any[]>([]);
+export default function AdminDashboard() {
+  const { user, loading: authLoading, isAdmin } = useAuth();
+  const { fetchAllUsageData } = useUsageData(); // Correctly destructure fetchAllUsageData from the hook
+
+  const [usersData, setUsersData] = useState<any[]>([]);
+  const [usageData, setUsageData] = useState<any[]>([]); // State for all usage data
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
-  const [showAddUser, setShowAddUser] = useState(false);
 
   useEffect(() => {
-    if (user && !authLoading) {
-      fetchUsers();
+    if (!authLoading) {
+      if (!user || !isAdmin()) {
+        setError('Access Denied: You must be an admin to view this page.');
+        setLoading(false);
+      } else {
+        fetchUsers();
+        fetchUsageData(); // Call the correct function name
+      }
     }
-  }, [user, authLoading]);
+  }, [user, authLoading, isAdmin]);
 
   const fetchUsers = async () => {
     setLoading(true);
     try {
-      const data = await getAllUsers();
-      setUsers(data);
+      // Pass isAdmin() flag to getAllUsers
+      const data = await getAllUsers(isAdmin());
+      setUsersData(data);
       setError('');
     } catch (err: any) {
       console.error('Error fetching users:', err);
       setError(err.message || 'Failed to fetch users');
+      toast.error(`Failed to fetch users: ${err.message}`);
     } finally {
       setLoading(false);
     }
   };
 
-  if (authLoading) {
-    return <div className="flex justify-center items-center min-h-screen">Loading...</div>;
+  const fetchUsageData = async () => {
+    setLoading(true);
+    try {
+      // Call fetchAllUsageData from the hook
+      const data = await fetchAllUsageData(); // This is the correct function call
+      setUsageData(data);
+      setError('');
+    } catch (err: any) {
+      console.error('Error fetching usage data:', err);
+      setError(err.message || 'Failed to fetch usage data');
+      toast.error(`Failed to fetch usage data: ${err.message}`);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  if (authLoading || loading) {
+    return <div className="flex justify-center items-center min-h-screen">Loading Admin Dashboard...</div>;
+  }
+
+  if (error) {
+    return (
+      <div className="container mx-auto px-4 py-8 text-center">
+        <h1 className="text-3xl font-bold mb-6">Error</h1>
+        <p className="text-red-500">{error}</p>
+      </div>
+    );
   }
 
   return (
-    <ProtectedRoute requireAdmin={true}>
-      <div>
-        <div className="flex justify-between items-center mb-8">
-          <h1 className="text-3xl font-bold">User Management</h1>
-          <button 
-            onClick={() => setShowAddUser(true)}
-            className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700"
-          >
-            + Add New User
-          </button>
+    <div className="container mx-auto px-4 py-8">
+      <h1 className="text-3xl font-bold mb-6">Admin Dashboard</h1>
+
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 mb-8">
+        <div className="bg-white p-6 rounded-lg shadow-md">
+          <h2 className="text-xl font-semibold mb-2">Total Users</h2>
+          <p className="text-3xl font-bold text-blue-600">{usersData.length}</p>
         </div>
+        <div className="bg-white p-6 rounded-lg shadow-md">
+          <h2 className="text-xl font-semibold mb-2">Active Users</h2>
+          <p className="text-3xl font-bold text-green-600">{usersData.filter(u => u.isActive).length}</p>
+        </div>
+        <div className="bg-white p-6 rounded-lg shadow-md">
+          <h2 className="text-xl font-semibold mb-2">Admins</h2>
+          <p className="text-3xl font-bold text-purple-600">{usersData.filter(u => u.role === 'admin').length}</p>
+        </div>
+      </div>
 
-        {error && (
-          <div className="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded mb-4">
-            {error}
+      <div className="bg-white p-6 rounded-lg shadow-md mb-8">
+        <h2 className="text-xl font-semibold mb-4">User List</h2>
+        <div className="overflow-x-auto">
+          <table className="min-w-full divide-y divide-gray-200">
+            <thead className="bg-gray-50">
+              <tr>
+                <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                  Name
+                </th>
+                <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                  Email
+                </th>
+                <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                  Role
+                </th>
+                <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                  Status
+                </th>
+                <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                  Agent ID
+                </th>
+                <th scope="col" className="relative px-6 py-3">
+                  <span className="sr-only">Actions</span>
+                </th>
+              </tr>
+            </thead>
+            <tbody className="bg-white divide-y divide-gray-200">
+              {usersData.map((userItem) => (
+                <tr key={userItem.id}>
+                  <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
+                    {userItem.displayName}
+                  </td>
+                  <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                    {userItem.email}
+                  </td>
+                  <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                    <span className={`px-2 inline-flex text-xs leading-5 font-semibold rounded-full ${
+                      userItem.role === 'admin' ? 'bg-purple-100 text-purple-800' : 'bg-blue-100 text-blue-800'
+                    }`}>
+                      {userItem.role}
+                    </span>
+                  </td>
+                  <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                    <span className={`px-2 inline-flex text-xs leading-5 font-semibold rounded-full ${
+                      userItem.isActive ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'
+                    }`}>
+                      {userItem.isActive ? 'Active' : 'Inactive'}
+                    </span>
+                  </td>
+                  <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                    {userItem.elevenLabsAgentId || 'N/A'}
+                  </td>
+                  <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
+                    <a href={`/admin/users/${userItem.id}`} className="text-blue-600 hover:text-blue-900">
+                      View
+                    </a>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <div className="bg-white p-6 rounded-lg shadow-md">
+        <h2 className="text-xl font-semibold mb-4">Overall Usage Statistics</h2>
+        {usageData.length > 0 ? (
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+            {/* You might want to aggregate these values from 'usageData' array */}
+            <div className="p-4 border border-gray-200 rounded-md">
+              <h3 className="text-lg font-medium mb-2">Total Minutes Used (Aggregated)</h3>
+              <p className="text-3xl font-bold text-blue-600">
+                {usageData.reduce((sum, item) => sum + (item.totalMinutesUsed || 0), 0).toFixed(2)}
+              </p>
+            </div>
+            <div className="p-4 border border-gray-200 rounded-md">
+              <h3 className="text-lg font-medium mb-2">Total Minutes Remaining (Aggregated)</h3>
+              <p className="text-3xl font-bold text-green-600">
+                {usageData.reduce((sum, item) => sum + (item.minutesRemaining || 0), 0).toFixed(2)}
+              </p>
+            </div>
+            <div className="p-4 border border-gray-200 rounded-md">
+              <h3 className="text-lg font-medium mb-2">Total Credits Left (Aggregated)</h3>
+              <p className="text-3xl font-bold text-purple-600">
+                {usageData.reduce((sum, item) => sum + (item.creditsLeft || 0), 0)}
+              </p>
+            </div>
           </div>
-        )}
-
-        {loading ? (
-          <div className="bg-white p-6 rounded-lg shadow-md animate-pulse h-40"></div>
         ) : (
-          <div className="bg-white rounded-lg shadow-md overflow-hidden">
-            <div className="overflow-x-auto">
-              <table className="min-w-full divide-y divide-gray-200">
-                <thead className="bg-gray-50">
-                  <tr>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Name</th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Email</th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Phone</th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Business</th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Role</th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Actions</th>
-                  </tr>
-                </thead>
-                <tbody className="bg-white divide-y divide-gray-200">
-                  {users.length > 0 ? (
-                    users.map((user) => (
-                      <tr key={user.id}>
-                        <td className="px-6 py-4 whitespace-nowrap">{user.displayName}</td>
-                        <td className="px-6 py-4 whitespace-nowrap">{user.email}</td>
-                        <td className="px-6 py-4 whitespace-nowrap">{user.phoneNumber || 'N/A'}</td>
-                        <td className="px-6 py-4 whitespace-nowrap">{user.businessName || 'N/A'}</td>
-                        <td className="px-6 py-4 whitespace-nowrap">
-                          <span className={`px-2 inline-flex text-xs leading-5 font-semibold rounded-full ${
-                            user.role === 'admin' ? 'bg-purple-100 text-purple-800' : 'bg-blue-100 text-blue-800'
-                          }`}>
-                            {user.role}
-                          </span>
-                        </td>
-                        <td className="px-6 py-4 whitespace-nowrap">
-                          <span className={`px-2 inline-flex text-xs leading-5 font-semibold rounded-full ${
-                            user.isActive ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'
-                          }`}>
-                            {user.isActive ? 'Active' : 'Inactive'}
-                          </span>
-                        </td>
-                        <td className="px-6 py-4 whitespace-nowrap text-sm font-medium">
-                          <a href={`/admin/users/${user.id}`} className="text-indigo-600 hover:text-indigo-900 mr-3">View</a>
-                          <a href={`/admin/users/${user.id}/edit`} className="text-blue-600 hover:text-blue-900 mr-3">Edit</a>
-                          <button className={`${user.isActive ? 'text-red-600 hover:text-red-900' : 'text-green-600 hover:text-green-900'}`}>
-                            {user.isActive ? 'Deactivate' : 'Activate'}
-                          </button>
-                        </td>
-                      </tr>
-                    ))
-                  ) : (
-                    <tr>
-                      <td colSpan={7} className="px-6 py-4 text-center text-sm text-gray-500">No users found</td>
-                    </tr>
-                  )}
-                </tbody>
-              </table>
-            </div>
-          </div>
-        )}
-
-        {showAddUser && (
-          <div className="fixed inset-0 bg-gray-600 bg-opacity-50 flex justify-center items-center">
-            <div className="bg-white p-6 rounded-lg shadow-lg max-w-2xl w-full max-h-screen overflow-y-auto">
-              <div className="flex justify-between items-center mb-4">
-                <h2 className="text-2xl font-bold">Add New User</h2>
-                <button onClick={() => setShowAddUser(false)} className="text-gray-500 hover:text-gray-700">
-                  &times;
-                </button>
-              </div>
-              <UserCreationForm
-                onSuccess={() => {
-                  setShowAddUser(false);
-                  fetchUsers();
-                }}
-                onCancel={() => setShowAddUser(false)}
-              />
-            </div>
-          </div>
+          <p className="text-gray-500">No overall usage data available.</p>
         )}
       </div>
-    </ProtectedRoute>
+    </div>
   );
 }

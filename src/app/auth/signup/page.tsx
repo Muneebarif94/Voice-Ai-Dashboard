@@ -3,57 +3,34 @@
 
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { useAuth } from '@/lib/auth';
+import { useAuth } from '@/lib/auth'; // Ensure this import is correct
+import Link from 'next/link';
+import { toast } from 'react-hot-toast'; // Assuming you have react-hot-toast installed
 
-export default function SignUp() {
-  const { signUp } = useAuth();
-  const router = useRouter();
-  
-  const [formData, setFormData] = useState({
-    displayName: '',
-    email: '',
-    password: '',
-    confirmPassword: ''
-  });
+export default function SignUpPage() {
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [displayName, setDisplayName] = useState('');
+  const [phoneNumber, setPhoneNumber] = useState('');
+  const [businessName, setBusinessName] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
-
-  const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const { name, value } = e.target;
-    setFormData(prev => ({
-      ...prev,
-      [name]: value
-    }));
-  };
+  const { signup } = useAuth(); // Correctly destructure signup from useAuth()
+  const router = useRouter();
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    setError('');
-    
-    // Validate form
-    if (!formData.displayName || !formData.email || !formData.password) {
-      setError('All fields are required');
-      return;
-    }
-    
-    if (formData.password !== formData.confirmPassword) {
-      setError('Passwords do not match');
-      return;
-    }
-    
-    if (formData.password.length < 6) {
-      setError('Password must be at least 6 characters');
-      return;
-    }
-    
     setLoading(true);
-    
+    setError('');
+
     try {
-      await signUp(formData.email, formData.password, formData.displayName, 'user');
-      router.push('/dashboard');
+      await signup(email, password, displayName, phoneNumber, businessName);
+      toast.success('Account created successfully! Please log in.');
+      router.push('/auth/signin');
     } catch (err: any) {
-      console.error('Error signing up:', err);
-      setError(err.message || 'Failed to sign up');
+      console.error('Signup error:', err);
+      setError(err.message || 'Failed to create an account. Please try again.');
+      toast.error(err.message || 'Failed to create an account.');
     } finally {
       setLoading(false);
     }
@@ -63,36 +40,12 @@ export default function SignUp() {
     <div className="min-h-screen flex items-center justify-center bg-gray-50 py-12 px-4 sm:px-6 lg:px-8">
       <div className="max-w-md w-full space-y-8">
         <div>
-          <h1 className="text-center text-3xl font-extrabold text-gray-900">
-            AI Voice Agent Usage Tracker
-          </h1>
-          <h2 className="mt-6 text-center text-2xl font-bold text-gray-900">
+          <h2 className="mt-6 text-center text-3xl font-extrabold text-gray-900">
             Create your account
           </h2>
         </div>
-        
-        {error && (
-          <div className="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded">
-            {error}
-          </div>
-        )}
-        
         <form className="mt-8 space-y-6" onSubmit={handleSubmit}>
           <div className="rounded-md shadow-sm -space-y-px">
-            <div>
-              <label htmlFor="displayName" className="sr-only">Full Name</label>
-              <input
-                id="displayName"
-                name="displayName"
-                type="text"
-                autoComplete="name"
-                required
-                value={formData.displayName}
-                onChange={handleChange}
-                className="appearance-none rounded-none relative block w-full px-3 py-2 border border-gray-300 placeholder-gray-500 text-gray-900 rounded-t-md focus:outline-none focus:ring-blue-500 focus:border-blue-500 focus:z-10 sm:text-sm"
-                placeholder="Full Name"
-              />
-            </div>
             <div>
               <label htmlFor="email-address" className="sr-only">Email address</label>
               <input
@@ -101,10 +54,10 @@ export default function SignUp() {
                 type="email"
                 autoComplete="email"
                 required
-                value={formData.email}
-                onChange={handleChange}
-                className="appearance-none rounded-none relative block w-full px-3 py-2 border border-gray-300 placeholder-gray-500 text-gray-900 focus:outline-none focus:ring-blue-500 focus:border-blue-500 focus:z-10 sm:text-sm"
+                className="appearance-none rounded-none relative block w-full px-3 py-2 border border-gray-300 placeholder-gray-500 text-gray-900 rounded-t-md focus:outline-none focus:ring-blue-500 focus:border-blue-500 focus:z-10 sm:text-sm"
                 placeholder="Email address"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
               />
             </div>
             <div>
@@ -115,47 +68,76 @@ export default function SignUp() {
                 type="password"
                 autoComplete="new-password"
                 required
-                value={formData.password}
-                onChange={handleChange}
                 className="appearance-none rounded-none relative block w-full px-3 py-2 border border-gray-300 placeholder-gray-500 text-gray-900 focus:outline-none focus:ring-blue-500 focus:border-blue-500 focus:z-10 sm:text-sm"
                 placeholder="Password"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
               />
             </div>
             <div>
-              <label htmlFor="confirmPassword" className="sr-only">Confirm Password</label>
+              <label htmlFor="display-name" className="sr-only">Display Name</label>
               <input
-                id="confirmPassword"
-                name="confirmPassword"
-                type="password"
-                autoComplete="new-password"
+                id="display-name"
+                name="displayName"
+                type="text"
+                autoComplete="name"
                 required
-                value={formData.confirmPassword}
-                onChange={handleChange}
+                className="appearance-none rounded-none relative block w-full px-3 py-2 border border-gray-300 placeholder-gray-500 text-gray-900 focus:outline-none focus:ring-blue-500 focus:border-blue-500 focus:z-10 sm:text-sm"
+                placeholder="Display Name"
+                value={displayName}
+                onChange={(e) => setDisplayName(e.target.value)}
+              />
+            </div>
+            <div>
+              <label htmlFor="phone-number" className="sr-only">Phone Number</label>
+              <input
+                id="phone-number"
+                name="phoneNumber"
+                type="tel"
+                autoComplete="tel"
+                className="appearance-none rounded-none relative block w-full px-3 py-2 border border-gray-300 placeholder-gray-500 text-gray-900 focus:outline-none focus:ring-blue-500 focus:border-blue-500 focus:z-10 sm:text-sm"
+                placeholder="Phone Number (Optional)"
+                value={phoneNumber}
+                onChange={(e) => setPhoneNumber(e.target.value)}
+              />
+            </div>
+            <div>
+              <label htmlFor="business-name" className="sr-only">Business Name</label>
+              <input
+                id="business-name"
+                name="businessName"
+                type="text"
+                autoComplete="organization"
                 className="appearance-none rounded-none relative block w-full px-3 py-2 border border-gray-300 placeholder-gray-500 text-gray-900 rounded-b-md focus:outline-none focus:ring-blue-500 focus:border-blue-500 focus:z-10 sm:text-sm"
-                placeholder="Confirm Password"
+                placeholder="Business Name (Optional)"
+                value={businessName}
+                onChange={(e) => setBusinessName(e.target.value)}
               />
             </div>
           </div>
+
+          {error && (
+            <div className="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded relative" role="alert">
+              <span className="block sm:inline">{error}</span>
+            </div>
+          )}
 
           <div>
             <button
               type="submit"
               disabled={loading}
-              className="group relative w-full flex justify-center py-2 px-4 border border-transparent text-sm font-medium rounded-md text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 disabled:bg-blue-300"
+              className="group relative w-full flex justify-center py-2 px-4 border border-transparent text-sm font-medium rounded-md text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 disabled:opacity-50"
             >
-              {loading ? 'Creating account...' : 'Sign up'}
+              {loading ? 'Signing Up...' : 'Sign Up'}
             </button>
           </div>
-          
-          <div className="text-center">
-            <p className="text-sm text-gray-600">
-              Already have an account?{' '}
-              <a href="/auth/signin" className="font-medium text-blue-600 hover:text-blue-500">
-                Sign in
-              </a>
-            </p>
-          </div>
         </form>
+        <div className="text-sm text-center">
+          Already have an account?{' '}
+          <Link href="/auth/signin" className="font-medium text-blue-600 hover:text-blue-500">
+            Sign in
+          </Link>
+        </div>
       </div>
     </div>
   );
